@@ -61,8 +61,8 @@ process_taxonomy <- function(file_path) {
   return(tax_mat)
 }
 
-tax_bac <- process_taxonomy("/data/gpfs/projects/punim2504/data/gtdb/bac120_taxonomy_r220.tsv")
-tax_arc <- process_taxonomy("/data/gpfs/projects/punim2504/data/gtdb/ar53_taxonomy_r220.tsv")
+tax_bac <- process_taxonomy("/data/gpfs/projects/punim2504/msc_thesis/data/gtdb/bac120_taxonomy_r220.tsv")
+tax_arc <- process_taxonomy("/data/gpfs/projects/punim2504/msc_thesis/data/gtdb/ar53_taxonomy_r220.tsv")
 
 tax_mat_all <- bind_rows(tax_bac, tax_arc)
 
@@ -75,13 +75,13 @@ tax_mat <- tax_mat %>% select(-Species)
 ##TREE
 ```{r}
 
-tree_bac <- read.tree("/data/gpfs/projects/punim2504/data/gtdb/bac120_r220.tree")
-tree_arc <- read.tree("/data/gpfs/projects/punim2504/data/gtdb/ar53_r220.tree")
+tree_bac <- read.tree("/data/gpfs/projects/punim2504/msc_thesis/data/gtdb/bac120_r220.tree")
+tree_arc <- read.tree("/data/gpfs/projects/punim2504/msc_thesis/data/gtdb/ar53_r220.tree")
 tree_all <- bind.tree(tree_bac, tree_arc)
 
 
-meta_bac <- fread("/data/gpfs/projects/punim2504/data/gtdb/bac120_metadata_r220.tsv")
-meta_arc <- fread("/data/gpfs/projects/punim2504/data/gtdb/ar53_metadata_r220.tsv")
+meta_bac <- fread("/data/gpfs/projects/punim2504/msc_thesis/data/gtdb/bac120_metadata_r220.tsv")
+meta_arc <- fread("/data/gpfs/projects/punim2504/msc_thesis/data/gtdb/ar53_metadata_r220.tsv")
 meta_all <- rbind(meta_bac, meta_arc)
 
 meta_all[, species_name := gsub(".*s__", "s__", gtdb_taxonomy)]
@@ -100,7 +100,7 @@ tree_pruned <- drop.tip(tree_all, tips_to_drop)
 
 ## metadata
 ```{r}
-metadata <- read_csv("/data/gpfs/projects/punim2504/metadata_and_rank_tables_2025-06-11/metadata_1446.csv") %>%
+metadata <- read_csv("/data/gpfs/projects/punim2504/msc_thesis/data/metadata_1446.csv") %>%
   column_to_rownames("sra_run")
 
 ```
