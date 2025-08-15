@@ -28,4 +28,4 @@ unset __conda_setup
 # conda activate plot_map
 
 # insert your code here, for example:
-# python plot_map.py -i /home/lechuanr/punim2504/metadata_and_rank_tables_2025-06-11/metadata_1446.csv -c Prov -p k_8_adjusted --drop-dup
+# python plot_map.py -i /data/gpfs/projects/punim2504/msc_thesis/data/metadata_1446.csv -c Prov -p k_8_adjusted --drop-dup
