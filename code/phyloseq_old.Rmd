@@ -1,0 +1,213 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-05-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Create taxonomy table related to rank_species
+```{r}
+library(tidyverse)
+
+otu_df <- read_tsv("/home/lechuanr/punim2504/data/rank_tables/rank_species.csv") 
+  
+target_species <- colnames(otu_df)[-1]
+
+
+process_taxonomy <- function(file_path) {
+  taxonomy_df <- read_tsv(file_path, col_names = c("ID", "Taxonomy")) %>%
+    select(Taxonomy) %>%
+    mutate(Species = str_extract(Taxonomy, "s__[^;]+$")) %>%
+    filter(Species %in% target_species) %>%
+    distinct(Species, .keep_all = TRUE)
+
+  tax_split <- taxonomy_df %>%
+    separate(Taxonomy,
+             into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"),
+             sep = ";", fill = "right")
+    
+
+  tax_mat <- as.data.frame(tax_split)
+  rownames(tax_mat) <- tax_mat$Species
+
+  return(tax_mat)
+}
+
+
+tax_bac <- process_taxonomy("/home/lechuanr/punim2504/data/gtdb/bac120_taxonomy_r220.tsv")
+tax_arc <- process_taxonomy("/home/lechuanr/punim2504/data/gtdb/ar53_taxonomy_r220.tsv")
+
+
+tax_mat_all <- bind_rows(tax_bac, tax_arc)
+
+write.table(
+  tax_mat_all,
+  file = "/home/lechuanr/punim2504/analysis/unifrac/tax_mat_marine.tsv",
+  sep = "\t",
+  quote = FALSE,
+  col.names = NA  
+)
+
+
+
+
+
+```
+
+
+# Create physeq object
+```{r}
+library(phyloseq)
+library(tidyverse)
+library(ggplot2)
+
+otu_df <- read_tsv("/home/lechuanr/punim2504/data/rank_tables/rank_species.csv") %>%
+  column_to_rownames("sample")
+otu_numeric <- otu_df %>%
+  mutate(across(everything(), as.numeric))
+otu_mat <- as.matrix(otu_numeric)
+OTU <- otu_table(otu_mat, taxa_are_rows = FALSE)
+
+tax_mat <- read_tsv("tax_mat_marine.tsv") %>%
+  column_to_rownames("Species")
+
+TAX <- tax_table(as.matrix(tax_mat))
+ps = phyloseq(OTU, TAX)
+ps
+```
+# statistic information
+```{r}
+sample_sums(ps) # sum of abundance of all OTUs in each sample
+summary(sample_sums(ps))
+
+
+plot_sample_depth <- data.frame(SampleID = sample_names(ps),
+                                Reads = sample_sums(ps))
+ggplot(plot_sample_depth, aes(x = "", y = Reads)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.1, alpha = 0.5) +
+  labs(title = "Sample sequencing depth", y = "Reads per sample") +
+  theme_minimal()
+
+# frequency of OTUs
+otu_occurrence <- apply(otu_table(ps), 1, function(x) sum(x > 0))
+summary(otu_occurrence)
+
+df_occurrence <- data.frame(OTU = names(otu_occurrence), Occurrence = otu_occurrence)
+ggplot(df_occurrence, aes(x = Occurrence)) +
+  geom_histogram(binwidth = 1) +
+  labs(title = "OTU occurrence across samples", x = "Number of samples", y = "Count of OTUs") +
+  theme_minimal()
+
+otu_sums <- taxa_sums(ps) # sum of abundance of all sample in each OTU
+summary(otu_sums)
+
+
+```
+
+# Compute distance
+## List available method without metadata and tree
+```{r}
+
+library(phyloseq)
+dist_methods <- unlist(distanceMethodList)
+
+dist_methods <- setdiff(dist_methods, c("unifrac", "wunifrac", "dpcoa", "jsd"))
+print(dist_methods)
+
+set.seed(123) 
+sample_subset <- sample(sample_names(ps), 50)
+ps_sub <- prune_samples(sample_subset, ps)
+
+```
+
+
+
+
+
+
+
+
+
+## non-standadrzation
+```{r}
+library(phyloseq)
+library(ggplot2)
+library(gridExtra)
+library("plyr")
+
+dist_methods <- c("bray", "jaccard", "gower", "canberra", "kulczynski", "euclidean", "manhattan")
+
+
+plist <- list()
+for(i in dist_methods) {
+    message("Calculating: ", i)
+    iDist <- try(distance(ps_sub, method=i), silent=TRUE)
+    if (inherits(iDist, "try-error")) {
+        message("Skipping method: ", i, " (not supported or missing required data)")
+        next
+    }
+    iMDS <- try(ordinate(ps_sub, "MDS", distance=iDist), silent=TRUE)
+    if (inherits(iMDS, "try-error")) next
+    p <- plot_ordination(ps_sub, iMDS) + ggtitle(paste("MDS using", i))
+    plist[[i]] <- p
+}
+if (length(plist) > 0) {
+    do.call(grid.arrange, c(plist, ncol=2))
+} else {
+    message("No valid plots generated.")
+}
+
+
+png("MDS_plots.png", width=12, height=21, units="in", res=300)
+do.call(grid.arrange, c(plist, ncol=2))
+dev.off()
+
+
+```
+
+```{r}
+print(plist[[1]])
+print(plist[[2]])
+print(plist[[3]])
+print(plist[[4]])
+print(plist[[5]])
+print(plist[[6]])
+print(plist[[7]])
+
+```
+
+
+# CLR
+```{r}
+library(microbiome)
+
+ps_sub_clr <- microbiome::transform(ps_sub, "clr", pseudocount=1)
+
+clr_dist_methods <- c("euclidean", "manhattan")  
+
+plist_clr <- vector("list", length(clr_dist_methods))
+names(plist_clr) <- clr_dist_methods
+
+for(i in clr_dist_methods) {
+    iDist <- distance(ps_sub_clr, method=i)
+    iMDS <- ordinate(ps_sub_clr, "MDS", distance=iDist)
+    p <- plot_ordination(ps_sub_clr, iMDS) + ggtitle(paste("MDS using", i, "(CLR)"))
+    plist_clr[[i]] <- p
+}
+do.call(grid.arrange, c(plist_clr, ncol=2))
+
+
+
+
+```
+
+
+```{r}
+
+```
+

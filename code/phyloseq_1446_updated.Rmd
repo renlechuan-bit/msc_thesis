@@ -1,0 +1,347 @@
+---
+title: "Phyloseq_1446"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-07-7"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Sandpiper_1446
+
+```{r}
+library(tidyverse)
+library(ape)
+library(phyloseq)
+library(data.table)
+library(microbiome)
+library(ggplot2)
+library(phangorn)
+library(dplyr)
+library(readr)
+library(tibble)
+
+
+```
+
+## OTU
+```{r}
+otu_df <- read_tsv("/data/gpfs/projects/punim2504/metadata_and_rank_tables_2025-06-11/rank_tables/rank_species.csv") %>%
+  column_to_rownames("sample")
+
+target_species <- colnames(otu_df)  
+
+otu_numeric <- otu_df %>%
+  mutate(across(everything(), as.numeric))
+
+otu_mat <- as.matrix(otu_numeric)
+```
+
+## TAX
+```{r}
+process_taxonomy <- function(file_path) {
+  taxonomy_df <- read_tsv(file_path, col_names = c("ID", "Taxonomy")) %>%
+    select(Taxonomy) %>%
+    mutate(Species = str_extract(Taxonomy, "s__[^;]+$")) %>%
+    filter(Species %in% target_species) %>%
+    distinct(Species, .keep_all = TRUE)
+
+  tax_split <- taxonomy_df %>%
+    separate(Taxonomy,
+             into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"),
+             sep = ";", fill = "right")
+
+  tax_mat <- as.data.frame(tax_split)
+  rownames(tax_mat) <- tax_mat$Species
+
+  return(tax_mat)
+}
+
+tax_bac <- process_taxonomy("/data/gpfs/projects/punim2504/data/gtdb/bac120_taxonomy_r220.tsv")
+tax_arc <- process_taxonomy("/data/gpfs/projects/punim2504/data/gtdb/ar53_taxonomy_r220.tsv")
+
+tax_mat_all <- bind_rows(tax_bac, tax_arc)
+
+
+tax_mat <- tax_mat_all
+rownames(tax_mat) <- tax_mat$Species
+tax_mat <- tax_mat %>% select(-Species)
+```
+
+##TREE
+```{r}
+
+tree_bac <- read.tree("/data/gpfs/projects/punim2504/data/gtdb/bac120_r220.tree")
+tree_arc <- read.tree("/data/gpfs/projects/punim2504/data/gtdb/ar53_r220.tree")
+tree_all <- bind.tree(tree_bac, tree_arc)
+
+
+meta_bac <- fread("/data/gpfs/projects/punim2504/data/gtdb/bac120_metadata_r220.tsv")
+meta_arc <- fread("/data/gpfs/projects/punim2504/data/gtdb/ar53_metadata_r220.tsv")
+meta_all <- rbind(meta_bac, meta_arc)
+
+meta_all[, species_name := gsub(".*s__", "s__", gtdb_taxonomy)]
+meta_all[, species_name := gsub(";.*", "", species_name)]
+
+name_map <- setNames(meta_all$species_name, meta_all$accession)
+
+tree_all$tip.label <- name_map[tree_all$tip.label]
+
+species_keep <- colnames(otu_mat)
+tips_to_drop <- setdiff(tree_all$tip.label, species_keep)
+tree_pruned <- drop.tip(tree_all, tips_to_drop)
+```
+
+
+
+## metadata
+```{r}
+metadata <- read_csv("/data/gpfs/projects/punim2504/metadata_and_rank_tables_2025-06-11/metadata_1446.csv") %>%
+  column_to_rownames("sra_run")
+
+```
+
+##phyloseq object
+```{r}
+OTU <- otu_table(otu_mat, taxa_are_rows = FALSE)
+TAX <- tax_table(as.matrix(tax_mat))
+TREE <- phy_tree(tree_pruned)
+SAMPLE <- sample_data(metadata)
+
+ps <- phyloseq(OTU, TAX, TREE, SAMPLE)
+```
+
+
+# PCA with clr transformation col: "IHO_Sea_fmt"
+```{r}
+ps_clr <- transform(ps, "clr", pseudocount = 1)
+
+
+otu_clr <- otu_table(ps_clr)
+
+
+pca_res <- prcomp((otu_clr), scale. = TRUE)
+
+sample_df <- as.data.frame(sample_data(ps_clr))
+
+pca_df <- cbind(sample_df, pca_res$x[, 1:2])  
+
+
+ggplot(pca_df, aes(x = PC1, y = PC2, color = IHO_Sea_fmt)) +
+  geom_point(size = 3) +
+  labs(title = "PCA (CLR-transformed)") +
+  theme_minimal()
+
+```
+
+
+# Root tree with midpoint 
+```{r}
+
+tr <- phy_tree(ps)
+if (!ape::is.rooted(tr)) {
+  tr <- phangorn::midpoint(tr)  # 或 phytools::midpoint.root(tr)
+}
+phy_tree(ps) <- tr
+
+
+```
+
+```{r}
+ps_rel <- transform_sample_counts(ps, function(x) x / sum(x))
+```
+
+```{r}
+saveRDS(ps, file = "ps.rds")  
+saveRDS(ps_rel, file = "ps_rel.rds")  
+
+```
+
+
+```{r}
+ps_rel <- readRDS("ps_rel.rds")
+```
+
+
+# Distance comparison
+```{r}
+
+dist_methods <- c("manhattan", "euclidean", "canberra", "bray", "kulczynski",
+                  "jaccard", "morisita", "horn", "binomial", "jsd")
+
+dist_list <- list()
+
+for (method in dist_methods) {
+  message(paste("Calculating method:", method))
+  tryCatch({
+    d <- distance(ps_rel, method = method)
+    dist_list[[method]] <- d  
+    message(paste("Success:", method))
+    gc()
+  }, error = function(e) {
+    message(paste("Failed:", method, "| Error:", e$message))
+  })
+}
+
+
+
+
+
+
+
+
+
+```
+```{r}
+saveRDS(dist_list, file = "dist_list.rds")
+dist_list <- readRDS("dist_list.rds")
+```
+
+
+
+```{r}
+df_dist <- as.data.frame(dist_list)
+ref_col <- df_dist[[ref_method]]
+plot_list <- list()
+
+for (name in setdiff(names(df_dist), ref_method)) {
+  rho <- round(cor(ref_col, df_dist[[name]], method = "spearman"), 3)
+  plot_list[[name]] <- ggplot(data.frame(x = ref_col, y = df_dist[[name]]), aes(x, y)) +
+    geom_point(alpha = 0.4) + geom_smooth(method = "lm", se = F) +
+    labs(title = paste(name, "ρ =", rho)) + theme_minimal()
+}
+
+
+for (i in 1:length(plot_list)) {
+  print(plot_list[[i]])
+}
+```
+
+
+
+
+
+# Export for L2
+```{r}
+
+
+tree <- phy_tree(ps_rel)
+
+tree$tip.label <- gsub(" ", "@", tree$tip.label)
+
+
+if(!is.null(tree$node.label)) {
+  tree$node.label <- gsub(" ", "@", tree$node.label)
+}
+
+
+write.tree(tree, "temp_output.nwk")
+
+
+nwk_content <- readLines("temp_output.nwk")
+nwk_content <- gsub("@", " ", nwk_content)
+writeLines(nwk_content, "tree_L2_space.nwk")
+
+
+file.remove("temp_output.nwk")
+
+
+```
+
+
+```{r}
+
+otu <- as(otu_table(ps_rel), "matrix")
+if (!taxa_are_rows(ps_rel)) otu <- t(otu)
+storage.mode(otu) <- "double" 
+
+tax_df <- as.data.frame(as(tax_table(ps_rel), "matrix"), stringsAsFactors = FALSE)
+tax_df$taxonomy <- apply(tax_df, 1, function(x) paste(x[!is.na(x) & x != ""], collapse = ";"))
+
+otu_df <- as.data.frame(otu, check.names = FALSE) |>
+  rownames_to_column("#OTU ID") |>
+  left_join(tax_df |> rownames_to_column("#OTU ID") |> select(`#OTU ID`, taxonomy),
+            by = "#OTU ID")
+
+write_tsv(otu_df, "ps_rel_with_tax.tsv", na = "")
+
+
+
+```
+
+
+
+```{r}
+
+md <- as(sample_data(ps_rel), "data.frame") 
+md_out <- md %>%
+  rownames_to_column("SRA") %>%
+  dplyr::select(all_of(c("SRA", "IHO_Sea_fmt", "Prov", "biogeographical_province")))
+
+write_tsv(md_out, "metadata_forL2.txt", na = "")
+
+```
+
+
+```{r}
+
+export_tree_with_quoted_spaces <- function(ps_object, filename) {
+  tree <- phy_tree(ps_object)
+  
+  
+  n_tips <- length(tree$tip.label)
+  temp_ids <- sprintf("TMPID%06d", 1:n_tips)
+  
+  original_labels <- tree$tip.label
+  
+  tree$tip.label <- temp_ids
+  
+  
+  temp_newick <- write.tree(tree, file = "")
+  
+  final_newick <- temp_newick
+  for(i in 1:n_tips) {
+    if(grepl("[^a-zA-Z0-9_\\.]", original_labels[i])) {
+      
+      replacement <- paste0("'", original_labels[i], "'")
+    } else {
+      
+      replacement <- original_labels[i]
+    }
+    final_newick <- gsub(temp_ids[i], replacement, final_newick, fixed = TRUE)
+  }
+  
+  
+  writeLines(final_newick, filename)
+  cat("Tree exported with preserved spaces to:", filename, "\n")
+}
+
+
+export_tree_with_quoted_spaces(ps_rel, "tree_L2.nwk")
+
+```
+
+
+
+```{r}
+
+
+otu_table_df <- as.data.frame(otu_table(ps_rel))
+
+if(taxa_are_rows(ps_rel)) {
+  otu_table_df <- t(otu_table_df)
+  otu_table_df <- as.data.frame(otu_table_df)
+}
+
+otu_table_df <- cbind(OTU_ID = rownames(otu_table_df), otu_table_df)
+
+write.table(otu_table_df, "otu_table.tsv", 
+            sep="\t", row.names=FALSE, quote=FALSE)
+```
+
+
+
