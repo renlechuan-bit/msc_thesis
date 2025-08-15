@@ -17,7 +17,26 @@ def split_on_capitals(s, length=3):
     return ' '.join(re.findall(r'[A-Z][a-z]*', s)) if len(s) > length else s
 
 
-def plot_colored_markers(sample_metadata, color_category, cmap="tab20c", jitter=0.05, legend=True, title=None, drop_duplicate_coords=True):
+IHO_Sea_fmt_palette = {
+    'Southern Ocean': '#0022ff',
+    'South Pacific Ocean': '#000000',
+    'South Atlantic Ocean': '#000000',
+    'Indian Ocean': '#000000',
+    'Coral Sea': '#000000',
+    'North Pacific Ocean': '#000000',
+    'North Atlantic Ocean': '#000000',
+    'Bay of Bengal': '#000000',
+    'Arabian Sea': '#000000',
+    'Red Sea': '#000000',
+    'Mediterranean Sea': '#000000',
+    'Celtic Sea': '#000000',
+    'North Sea': '#000000',
+    'Baltic Sea': '#000000',
+    'Arctic Ocean': '#000000'
+ }
+
+
+def plot_colored_markers(sample_metadata, color_category, cmap="tab20c", jitter=0.05, legend=True, title=None, drop_duplicate_coords=True, custom_palette=None):
     # Create figure and projection
     projection = ccrs.PlateCarree()
     fig = plt.figure(figsize=(20 * 4, 5 * 4))
@@ -32,9 +51,12 @@ def plot_colored_markers(sample_metadata, color_category, cmap="tab20c", jitter=
     ax.add_feature(cfeature.LAKES, alpha=0.5)
     ax.add_feature(cfeature.RIVERS)
 
-    # Create a continuous color map
-    cmap = plt.get_cmap(cmap)
-    color_dict = {category: cmap(i) for i, category in enumerate(sample_metadata[color_category].unique())}
+    if custom_palette is None:
+        # Create a continuous color map
+        cmap = plt.get_cmap(cmap)
+        color_dict = {category: cmap(i) for i, category in enumerate(sample_metadata[color_category].unique())}
+    else:
+        color_dict = custom_palette
 
     if drop_duplicate_coords:
         sample_metadata_ = sample_metadata.drop_duplicates(subset="coords")
@@ -108,6 +130,7 @@ if __name__ == "__main__":
         legend=True,
         title=f"Map colored by {args.color}",
         drop_duplicate_coords=args.drop_dup,
+        # custom_palette=IHO_Sea_fmt_palette
     )
 
     ax = plot_colored_markers(**kwargs)
